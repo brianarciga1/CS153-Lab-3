@@ -79,7 +79,7 @@ trap(struct trapframe *tf)
     break;
   //////////////LAB 3
   case T_PGFLT: ;
-    cprintf("T_PGFLT A page fault has occured...\n");
+    //cprintf("T_PGFLT A page fault has occured...\n");
       
     uint address = rcr2();
     address = PGROUNDDOWN(address);
