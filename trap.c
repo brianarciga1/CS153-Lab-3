@@ -77,6 +77,21 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  //////////////LAB 3
+  case T_PGFLT: ;
+    cprintf("T_PGFLT A page fault has occured...\n");
+      
+    uint address = rcr2();
+    address = PGROUNDDOWN(address);
+    if(allocuvm(myproc()->pgdir, address, address + PGSIZE) == 0){
+      cprintf("fault is caused by an access to an unmapped page\n");
+    }
+    else {
+      myproc()->stack_size++;
+      cprintf("Increased stack size\n");
+    }
+    break;
+  //////////////LAB 3
 
   //PAGEBREAK: 13
   default:
