@@ -1,0 +1,230 @@
+diff --git a/Makefile b/Makefile
+index 2d2b9e4..8e70ac4 100644
+--- a/Makefile
++++ b/Makefile
+@@ -177,6 +177,8 @@ UPROGS=\
+ 	_zombie\
+ 	_shm_cnt\
+ 	_null\
++	_test\
++	_test1\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/exec.c b/exec.c
+index b40134f..6c5ec20 100644
+--- a/exec.c
++++ b/exec.c
+@@ -13,6 +13,7 @@ exec(char *path, char **argv)
+   char *s, *last;
+   int i, off;
+   uint argc, sz, sp, ustack[3+MAXARG+1];
++  int stack_size; //LAB 3
+   struct elfhdr elf;
+   struct inode *ip;
+   struct proghdr ph;
+@@ -62,11 +63,13 @@ exec(char *path, char **argv)
+ 
+   // Allocate two pages at the next page boundary.
+   // Make the first inaccessible.  Use the second as the user stack.
++  //LAB 3 new kernbase
+   sz = PGROUNDUP(sz);
+-  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
++  sp = KERNBASE - 1;
++  if((allocuvm(pgdir, sp - PGSIZE, sp)) == 0)
+     goto bad;
+-  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+-  sp = sz;
++  stack_size = 1;
++  //LAB 3 new kernase
+ 
+   // Push argument strings, prepare rest of stack in ustack.
+   for(argc = 0; argv[argc]; argc++) {
+@@ -97,6 +100,7 @@ exec(char *path, char **argv)
+   oldpgdir = curproc->pgdir;
+   curproc->pgdir = pgdir;
+   curproc->sz = sz;
++  curproc->stack_size = stack_size; //LAB 3
+   curproc->tf->eip = elf.entry;  // main
+   curproc->tf->esp = sp;
+   switchuvm(curproc);
+diff --git a/proc.c b/proc.c
+index 806b1b1..08e1afe 100644
+--- a/proc.c
++++ b/proc.c
+@@ -199,6 +199,7 @@ fork(void)
+   np->sz = curproc->sz;
+   np->parent = curproc;
+   *np->tf = *curproc->tf;
++  np->stack_size = curproc->stack_size; //LAB3
+ 
+   // Clear %eax so that fork returns 0 in the child.
+   np->tf->eax = 0;
+diff --git a/proc.h b/proc.h
+index 1647114..160a50e 100644
+--- a/proc.h
++++ b/proc.h
+@@ -37,6 +37,7 @@ enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+ // Per-process state
+ struct proc {
+   uint sz;                     // Size of process memory (bytes)
++  int stack_size; //LAB 3
+   pde_t* pgdir;                // Page table
+   char *kstack;                // Bottom of kernel stack for this process
+   enum procstate state;        // Process state
+diff --git a/syscall.c b/syscall.c
+index 94ef3c9..a7ce138 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -17,9 +17,9 @@
+ int
+ fetchint(uint addr, int *ip)
+ {
+-  struct proc *curproc = myproc();
++  //struct proc *curproc = myproc();
+ 
+-  if(addr >= curproc->sz || addr+4 > curproc->sz)
++  if(addr >= KERNBASE-1 || addr+4 > KERNBASE-1) //LAB 3 changed for kernbase - 1
+     return -1;
+   *ip = *(int*)(addr);
+   return 0;
+@@ -32,12 +32,12 @@ int
+ fetchstr(uint addr, char **pp)
+ {
+   char *s, *ep;
+-  struct proc *curproc = myproc();
++  //struct proc *curproc = myproc();
+ 
+-  if(addr >= curproc->sz)
++  if(addr >= KERNBASE-1) //LAB 3
+     return -1;
+   *pp = (char*)addr;
+-  ep = (char*)curproc->sz;
++  ep = (char*)(KERNBASE-1); //LAB 3
+   for(s = *pp; s < ep; s++){
+     if(*s == 0)
+       return s - *pp;
+@@ -59,11 +59,11 @@ int
+ argptr(int n, char **pp, int size)
+ {
+   int i;
+-  struct proc *curproc = myproc();
++  //struct proc *curproc = myproc();
+  
+   if(argint(n, &i) < 0)
+     return -1;
+-  if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
++  if(size < 0 || (uint)i >= KERNBASE-1 || (uint)i+size > KERNBASE-1) //LAB 3
+     return -1;
+   *pp = (char*)i;
+   return 0;
+diff --git a/test.c b/test.c
+new file mode 100644
+index 0000000..9a00ed1
+--- /dev/null
++++ b/test.c
+@@ -0,0 +1,31 @@
++#include "types.h"
++#include "user.h"
++
++// Prevent this function from being optimized, which might give it closed form
++#pragma GCC push_options
++#pragma GCC optimize ("O0")
++static int
++recurse(int n)
++{
++  if(n == 0)
++    return 0;
++  return n + recurse(n - 1);
++}
++#pragma GCC pop_options
++
++int
++main(int argc, char *argv[])
++{
++  int n, m;
++
++  if(argc != 2){
++    printf(1, "Usage: %s levels\n", argv[0]);
++    exit();
++  }
++
++  n = atoi(argv[1]);
++  printf(1, "Lab 3: Recursing %d levels\n", n);
++  m = recurse(n);
++  printf(1, "Lab 3: Yielded a value of %d\n", m);
++  exit();
++}
+diff --git a/test1.c b/test1.c
+new file mode 100644
+index 0000000..a404024
+--- /dev/null
++++ b/test1.c
+@@ -0,0 +1,9 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++int main (int argc, char* argv[]){
++  int v = argc;
++  printf(1, "%p\n", &v);
++  exit();
++}
+diff --git a/trap.c b/trap.c
+index 41c66eb..4f694df 100644
+--- a/trap.c
++++ b/trap.c
+@@ -77,6 +77,21 @@ trap(struct trapframe *tf)
+             cpuid(), tf->cs, tf->eip);
+     lapiceoi();
+     break;
++  //////////////LAB 3
++  case T_PGFLT: ;
++    //cprintf("T_PGFLT A page fault has occured...\n");
++      
++    uint address = rcr2();
++    address = PGROUNDDOWN(address);
++    if(allocuvm(myproc()->pgdir, address, address + PGSIZE) == 0){
++      cprintf("fault is caused by an access to an unmapped page\n");
++    }
++    else {
++      myproc()->stack_size++;
++      cprintf("Increased stack size\n");
++    }
++    break;
++  //////////////LAB 3
+ 
+   //PAGEBREAK: 13
+   default:
+diff --git a/vm.c b/vm.c
+index f623aa3..d155f3d 100644
+--- a/vm.c
++++ b/vm.c
+@@ -335,6 +335,27 @@ copyuvm(pde_t *pgdir, uint sz)
+     if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0)
+       goto bad;
+   }
++  
++   //////////////////////////////////////////LAB 3
++  struct proc *curproc = myproc();
++  uint k;
++  k = KERNBASE-1;
++  k = PGROUNDDOWN(k);
++
++    for(i = k; i > k - (curproc->stack_size) * PGSIZE; i -= PGSIZE){
++    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
++      panic("copyuvm: pte should exist");
++    if(!(*pte & PTE_P))
++      panic("copyuvm: page not present");
++    pa = PTE_ADDR(*pte);
++    flags = PTE_FLAGS(*pte);
++    if((mem = kalloc()) == 0)
++      goto bad;
++    memmove(mem, (char*)P2V(pa), PGSIZE);
++    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0)
++      goto bad;
++  }
++ //////////////////////////////////////////LAB 3
+   return d;
+ 
+ bad:
